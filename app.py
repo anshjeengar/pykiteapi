@@ -1,90 +1,64 @@
-from kiteconnect import KiteConnect, KiteTicker
-# from pandas import DataFrame
-import pandas as pd
-from datetime import datetime, timedelta
-import talib
+import pysnooper
+import sqlite3
+from datetime import datetime, #timedelta
+
 import icecream
+import pandas
+from nsedata import Nse
 
-if __name__=='__main__':
-    api_key = open('api_key.txt','r').read()
-    api_secret = open('api_secret.txt', 'r').read()
+@pysnooper.snoop()
+def fetchCodes(nse: Nse):
+    """#Fetch the scrips (code & company name) for live NSE server
+    Args:
+        nse (Nse): nsedata.Nse object
+    Returns:
+        [pandas.Dataframe]: List of Scrips
+    """
+    allCodes = sorted(nse.all_codes.items())
+    list_of_scrips = pandas.DataFrame.from_records(
+        allCodes, columns=["code", "company_name"]
+        )
+    return list_of_scrips
 
-    kite = KiteConnect(api_key=api_key)
+
+def main():
+    # for debugging
+    ic = icecream.ic
+    ic.enable()
+
+    # Initialize the Nse class and fetch the scrips for NSE server
+    nse = Nse()
+    listOfScrips = fetchCodes(nse)
+
+    # Create a table in sqlite3 db and insert the scrip data to it
+
+    with sqlite3.connect("nseData.db") as con:
+        ic(f"Database opened: {con}")
+        cur = con.cursor()
+        
+        ensure_schema = """CREATE TABLE IF NOT EXISTS scrips (
+            scrip_id VARCHAR PRIMARY KEY,
+            company_name VARCHAR UNIQUE NOT NULL)"""
+        cur.execute(ensure_schema)
+
+        cur.executemany(
+            "INSERT INTO scrips values (?, ?)",
+            zip(listOfScrips.code, listOfScrips.company_name),
+        )
+
+        con.commit()
     
-    # if already have the access token
-    access_token = open('access_token.txt', 'r').read()
+    scripHistoriacalData = nse.historical_data(
+        code="bel",
+        date_from=(1, 7, 2021), date_to=(9, 7, 2021),
+        give_json=True
+    )
+    ic(scripHistoriacalData)
 
-    kite.set_access_token(access_token)
+    # scrip_data = pd.DataFrame()
+    # for scrip in all_codes:
+    #     scrip_data = scrip_data.add()
 
-    # if if opening for the first time in the day
 
-    print(kite.login_url())
-    data = kite.generate_session("", api_secret=api_secret)
-    print(data['access_token'])
-    kite.set_access_token(data['access_token'])
-
-    with open('access_token.txt', 'w') as ak:
-        ak.write(data['access_token'])
-
-    from_date = datetime.strftime(datetime.now()-timedelta(100), '%y-%m-%d')
-    to_date = datetime.today().strftime('%y-%m-%d')
-    interval ='5minute'
-
-    tokens= {738561 :'RELIANCE'}
-    
-    while True:
-        if (datetime.now().second == 0) and (datetime.now().minute % 5 == 0):
-            for token in tokens:
-                records=kite.historical_data(token,from_date,to_date, interval)
-                df = pd.DataFrame(records)
-                df.drop(df.tail(1).index, inplace=True)
-
-                open =df['open'].values     
-                close =df['close'].values     
-                high =df['high'].values     
-                low =df['low'].values     
-                volume =df['volume'].values
-
-                sma5 =talib.SMA(close,5)
-                sma20 =talib.SMA(close,20)
-
-                icecream.ic(sma5[-1])
-                icecream.ic(sma20[-1])
-
-                price=kite.ltp('NSE'+tokens[token])
-                icecream.ic(price)
-
-                ltp =price['NSE:' + tokens[token]]['last_price']
-
-                # BUY order
-                if (sma5[-2]<sma20 and sma5[-1]>sma20[-1]):
-                    buy_order_id=kite.place_order(variety=kite.VARIETY_REGULAR,
-                                                exchange=kite.EXCHANGE_NSE,
-                                                order_type=kite.ORDER_TYPE_MARKET,
-                                                tradingsymbol=tokens[token],
-                                                transaction_type=kite.TRANSACTION_TYPE_BUY,
-                                                quantity=1,
-                                                # price=ltp,
-                                                # squareoff=10,
-                                                # stoploss=2,
-                                                # trailing_stoploss=1,
-                                                validity=kite.VALIDITY_DAY,
-                                                product=kite.PRODUCT_MIS)
-                icecream.ic(kite.orders())
-
-                # SELL order
-                if (sma5[-2]>sma20 and sma5[-1]<sma20[-1]):
-                    sell_order_id=kite.place_order(variety=kite.VARIETY_REGULAR,
-                                                exchange=kite.EXCHANGE_NSE,
-                                                order_type=kite.ORDER_TYPE_MARKET,
-                                                tradingsymbol=tokens[token],
-                                                transaction_type=kite.TRANSACTION_TYPE_SELL,
-                                                quantity=1,
-                                                # price=ltp,
-                                                # squareoff=10,
-                                                # stoploss=2,
-                                                # trailing_stoploss=1,
-                                                validity=kite.VALIDITY_DAY,
-                                                product=kite.PRODUCT_MIS)
-                icecream.ic(kite.orders())
-
+if __name__ == "__main__":
+    main()
